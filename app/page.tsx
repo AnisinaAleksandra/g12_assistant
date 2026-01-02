@@ -72,7 +72,7 @@ export default function Home() {
               <X className="h-4 w-4" />
             </Button>
           </div>
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden min-h-0">
             <ChatInterface />
           </div>
         </div>

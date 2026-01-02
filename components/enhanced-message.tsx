@@ -71,6 +71,7 @@ export function EnhancedMessage({ role, content, timestamp }: EnhancedMessagePro
         </div>
         <div className="flex flex-col gap-2">
           <div
+            style={{ maxWidth: "300px" }}
             className={cn(
               "rounded-2xl px-4 py-3 backdrop-blur-sm transition-all hover:shadow-lg",
               role === "user"
