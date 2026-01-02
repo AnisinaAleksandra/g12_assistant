@@ -37,9 +37,18 @@ let accessToken: string | null = null
 let tokenExpiry: number = 0
 
 /**
- * Get access token from GigaChat OAuth
+ * Reset access token (used when token expires or gets 401 error)
  */
-async function getAccessToken(): Promise<string> {
+function resetAccessToken(): void {
+  accessToken = null
+  tokenExpiry = 0
+}
+
+/**
+ * Get access token from GigaChat OAuth
+ * @param forceRefresh - Force token refresh even if current token is still valid
+ */
+async function getAccessToken(forceRefresh: boolean = false): Promise<string> {
   const clientId = process.env.GIGACHAT_CLIENT_ID
   const clientSecret = process.env.GIGACHAT_CLIENT_SECRET
   const scope = process.env.GIGACHAT_SCOPE || "GIGACHAT_API_PERS"
@@ -48,8 +57,8 @@ async function getAccessToken(): Promise<string> {
     throw new Error("GIGACHAT_CLIENT_ID and GIGACHAT_CLIENT_SECRET must be set")
   }
 
-  // Return cached token if still valid
-  if (accessToken && Date.now() < tokenExpiry) {
+  // Return cached token if still valid (unless force refresh)
+  if (!forceRefresh && accessToken && Date.now() < tokenExpiry) {
     return accessToken
   }
 
@@ -82,12 +91,26 @@ async function getAccessToken(): Promise<string> {
 
     const data = await response.json()
     accessToken = data.access_token
-    // Token expires in ~30 minutes, refresh 5 minutes early
-    tokenExpiry = Date.now() + (data.expires_at || 1800 - 300) * 1000
+    
+    // expires_at is unix timestamp in milliseconds (according to API spec)
+    // Refresh 5 minutes (300000 ms) early for safety
+    if (data.expires_at) {
+      // Check if expires_at is in milliseconds (>= 1000000000000) or seconds
+      const expiresAt = data.expires_at >= 1000000000000 
+        ? data.expires_at 
+        : data.expires_at * 1000
+      tokenExpiry = expiresAt - 300000 // 5 minutes buffer
+    } else {
+      // Fallback: assume 30 minutes from now
+      tokenExpiry = Date.now() + (30 * 60 - 5) * 1000
+    }
 
     return accessToken
   } catch (error: any) {
     clearTimeout(timeoutId)
+    
+    // Reset token on error
+    resetAccessToken()
     
     // Обрабатываем различные типы ошибок
     if (error.name === "AbortError") {
@@ -114,11 +137,10 @@ export async function generateTextWithGigaChat(
   model?: string
 ): Promise<string> {
   const modelName = model || process.env.GIGACHAT_MODEL || "GigaChat/GigaChat-Pro"
+  const apiUrl = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-  try {
-    const token = await getAccessToken()
-    const apiUrl = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-
+  // Helper function to make API request
+  const makeRequest = async (token: string, isRetry: boolean = false): Promise<string> => {
     // Создаем AbortController для таймаута
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 секунд таймаут
@@ -143,7 +165,34 @@ export async function generateTextWithGigaChat(
 
       if (!response.ok) {
         const errorText = await response.text()
-        throw new Error(`GigaChat API error: ${response.status} ${errorText}`)
+        let errorData: any = null
+        
+        // Try to parse error as JSON
+        try {
+          errorData = JSON.parse(errorText)
+        } catch {
+          // Not JSON, use text as is
+        }
+        
+        const errorMessage = errorData?.message || errorText
+        const fullErrorMessage = `GigaChat API error: ${response.status} ${errorMessage}`
+        
+        // Handle 401 Unauthorized - token expired
+        // Check both status code and error message
+        const isTokenExpired = response.status === 401 || 
+          (errorData && (errorData.message?.toLowerCase().includes("token has expired") ||
+                         errorData.message?.toLowerCase().includes("unauthorized")))
+        
+        if (isTokenExpired && !isRetry) {
+          console.log("[GigaChat] Token expired (401), refreshing token and retrying...")
+          // Reset token to force refresh
+          resetAccessToken()
+          // Get new token and retry once
+          const newToken = await getAccessToken(true)
+          return makeRequest(newToken, true)
+        }
+        
+        throw new Error(fullErrorMessage)
       }
 
       const data: GigaChatResponse = await response.json()
@@ -162,6 +211,11 @@ export async function generateTextWithGigaChat(
       
       throw fetchError
     }
+  }
+
+  try {
+    const token = await getAccessToken()
+    return await makeRequest(token)
   } catch (error: any) {
     // Логируем ошибку, но не пробрасываем дальше - будет fallback на mock
     console.error("GigaChat error:", error.message || error)

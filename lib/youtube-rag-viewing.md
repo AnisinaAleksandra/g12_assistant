@@ -114,3 +114,4 @@ curl "http://localhost:3000/api/youtube/rag-content?videoId=VIDEO_ID&limit=100"
 - Проверьте, что чанки содержат текст
 - Попробуйте более точный поисковый запрос
 
+

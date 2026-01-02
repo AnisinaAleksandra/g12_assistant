@@ -24,7 +24,7 @@ export function FollowUpQuestions({ questions, onQuestionClick }: FollowUpQuesti
             variant="outline"
             size="sm"
             onClick={() => onQuestionClick(question)}
-            className="text-xs h-auto py-2 px-3 hover:bg-primary hover:text-primary-foreground transition-all hover:scale-105 hover:shadow-md"
+            className="text-xs h-auto py-2 px-3 hover:bg-primary transition-all hover:scale-105 hover:shadow-md"
             style={{ animationDelay: `${index * 50}ms` }}
           >
             {question}
